@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="build-id" content="20260916-012748">
+<title>Colorizing the Prokudin-Gorskii Collection · CS180 Project 1 · Phi Linh Phan</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main>
+
+<header class="title">
+  <h1>Images of the Russian Empire: Colorizing the Prokudin-Gorskii Photo Collection</h1>
+  <p class="sub">CS180 Project 1 · Phi Linh Phan · UC Berkeley, Fall 2026 · <a href="../">portfolio</a></p>
+</header>
+
+<div class="grid grid-3 hero"><figure><img src="media/raw_cathedral.jpg" alt="The digitized glass plate: three exposures stacked top to bottom (blue, green, red filters)."><figcaption>The digitized glass plate: three exposures stacked top to bottom (blue, green, red filters).</figcaption></figure><figure><img src="media/naive_cathedral.jpg" alt="Channels stacked without alignment: colour fringes everywhere."><figcaption>Channels stacked without alignment: colour fringes everywhere.</figcaption></figure><figure><img src="media/pyr_ncc_cathedral.jpg" alt="Aligned with the pyramid search (NCC): G shifted by (2, 5), R by (3, 12)."><figcaption>Aligned with the pyramid search (NCC): G shifted by (2, 5), R by (3, 12).</figcaption></figure></div>
+
+<nav class="toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#data">Data and preprocessing</a></li>
+    <li><a href="#single">Single-scale exhaustive search (L2 and NCC)</a></li>
+    <li><a href="#pyramid">Coarse-to-fine pyramid alignment</a></li>
+    <li><a href="#extra">Extra plates from the Library of Congress</a></li>
+    <li><a href="#failures">Failure analysis</a></li>
+    <li><a href="#bells">Bells and whistles</a></li>
+    <li><a href="#repro">Reproducibility and runtime</a></li>
+  </ol>
+</nav>
+
+<h2 id="overview">1. Overview</h2>
+<p>Between 1909 and 1915 Sergei Mikhailovich Prokudin-Gorskii photographed the Russian Empire in colour
+by exposing three glass negatives of every scene through blue, green and red filters. The Library of
+Congress (LoC) scanned the surviving plates, each as one tall grayscale image with the three exposures
+stacked top to bottom (B, G, R). The three exposures were taken a few seconds apart and the plates were
+not perfectly registered in the camera, so simply stacking the thirds as colour channels produces the
+fringed mess in the middle image above. The task of this project is to align the plates automatically and
+produce a clean colour photograph, using nothing more than a translation model and image-matching metrics
+implemented from scratch.</p>
+<p>What I built, in the order the write-up follows:</p>
+<ul>
+  <li>a <b>single-scale exhaustive search</b> over a window of displacements, scored with the L2 (Euclidean)
+      distance and with normalized cross-correlation (NCC) on raw pixel values;</li>
+  <li>a <b>coarse-to-fine image pyramid</b> (my own binomial blur + 2× subsampling) that makes the same
+      search feasible on the 3700 × 3200 px, 16-bit TIFF plates in about 1.5 seconds each;</li>
+  <li>an evaluation on the 14 provided plates plus 4 full-resolution plates I downloaded from
+      the LoC. With raw-pixel NCC every plate except <i>emir</i> aligns to the pixel; with L2 two plates fail;</li>
+  <li>bells and whistles: gradient-magnitude features (which fix <i>emir</i>), automatic cropping,
+      automatic contrast, automatic white balance, a colour-mapping experiment against the LoC composites,
+      rotation and scale refinement (the plates turn out to differ in scale by ≈0.4 %), and the same
+      pipeline applied to three photographic plates from the Palomar sky survey.</li>
+</ul>
+
+<h2 id="data">2. Data and preprocessing</h2>
+<p>The provided data set has three small JPEG plates (about 390 × 1024 px, 8-bit) meant for developing the
+naive method and eleven large TIFF plates (about 3700 × 9700 px, 16-bit). The four extra plates are the
+LoC's 8-bit masters (about 3700 × 9700 px as well).</p>
+<div class="tablewrap"><table><thead><tr><th>plate</th><th>origin</th><th>scan</th><th>channel size (w × h)</th><th>pyramid levels</th></tr></thead><tbody><tr><td>cathedral</td><td>provided</td><td>8-bit JPEG</td><td>390 × 341</td><td>1</td></tr><tr><td>monastery</td><td>provided</td><td>8-bit JPEG</td><td>391 × 341</td><td>1</td></tr><tr><td>tobolsk</td><td>provided</td><td>8-bit JPEG</td><td>396 × 341</td><td>1</td></tr><tr><td>church</td><td>provided</td><td>16-bit TIFF</td><td>3634 × 3202</td><td>4</td></tr><tr><td>emir</td><td>provided</td><td>16-bit TIFF</td><td>3702 × 3209</td><td>4</td></tr><tr><td>harvesters</td><td>provided</td><td>16-bit TIFF</td><td>3683 × 3218</td><td>4</td></tr><tr><td>icon</td><td>provided</td><td>16-bit TIFF</td><td>3741 × 3244</td><td>4</td></tr><tr><td>ilemselga</td><td>provided</td><td>16-bit TIFF</td><td>3800 × 3270</td><td>4</td></tr><tr><td>melons</td><td>provided</td><td>16-bit TIFF</td><td>3770 × 3241</td><td>4</td></tr><tr><td>religious_painting</td><td>provided</td><td>16-bit TIFF</td><td>3742 × 3193</td><td>4</td></tr><tr><td>self_portrait</td><td>provided</td><td>16-bit TIFF</td><td>3810 × 3251</td><td>4</td></tr><tr><td>siren</td><td>provided</td><td>16-bit TIFF</td><td>3817 × 3250</td><td>4</td></tr><tr><td>three_generations</td><td>provided</td><td>16-bit TIFF</td><td>3714 × 3209</td><td>4</td></tr><tr><td>wharf</td><td>provided</td><td>16-bit TIFF</td><td>3761 × 3244</td><td>4</td></tr><tr><td>isfandiyar</td><td>downloaded (LoC)</td><td>8-bit TIFF</td><td>3693 × 3212</td><td>4</td></tr><tr><td>karlinskii</td><td>downloaded (LoC)</td><td>8-bit TIFF</td><td>3761 × 3257</td><td>4</td></tr><tr><td>peasant_girls</td><td>downloaded (LoC)</td><td>8-bit TIFF</td><td>3712 × 3202</td><td>4</td></tr><tr><td>vitebsk_cathedral</td><td>downloaded (LoC)</td><td>8-bit TIFF</td><td>3761 × 3257</td><td>4</td></tr></tbody></table></div>
+<p><b>Loading.</b> I read each scan with Pillow and convert it to <code>float32</code> in [0, 1] by
+dividing by the maximum of the integer type: 255 for the JPEGs, <em>65535 for the TIFFs</em>. (The
+data-directory skeleton divides by 255 unconditionally, which would map a 16-bit scan to [0, 257].)
+Working in floating point on the same scale is what makes L2 values and NCC values comparable across
+images and pyramid levels.</p>
+<p><b>Splitting.</b> The plate height is divided by three and floored, and the scan is cut into the
+top (B), middle (G) and bottom (R) thirds; the one or two leftover rows are dropped so that the three
+channels have identical shapes.</p>
+<p><b>Displacement convention.</b> All displacements on this page are the shift <em>(x, y)</em> applied
+to the moving plate (G or R) so that it lands on the reference plate (B): positive <em>x</em> moves content
+to the right, positive <em>y</em> moves it down. In code this is exactly
+<code>np.roll(channel, (y, x), axis=(0, 1))</code>. The final colour image is
+<code>np.dstack([roll(R, d_R), roll(G, d_G), B])</code>.</p>
+<p><b>Ignoring borders.</b> Every plate carries a saturated white scanner margin and a black film edge,
+and <code>np.roll</code> wraps the pixels that leave one side back in on the other. Both would dominate
+any pixel-wise score, so a metric is only ever evaluated on the interior of the two images: I drop 15 %
+of the rows and columns on every side (plus, at every pyramid level, at least the largest displacement
+the search can produce, so the wrapped band can never enter the scored region). Fifteen percent is
+generous — the measured margins reach 8 % and the largest shift 5.5 % of the plate — and still leaves
+70 % × 70 % of the frame, about 6 million pixels, for scoring a full-size plate.</p>
+
+<h2 id="single">3. Single-scale exhaustive search (L2 and NCC)</h2>
+<p>The naive method is exactly what the assignment describes: for every integer displacement
+<em>(dx, dy)</em> in a window — [−15, 15] in both directions, 961 candidates — shift the moving channel,
+compare its interior with the interior of the reference, and keep the best score.</p>
+<pre>best = None
+for dy in range(-15, 16):
+    for dx in range(-15, 16):
+        moved = interior(np.roll(mov, (dy, dx)))     # implemented as a slice, see below
+        cost  = metric(interior(ref), moved)          # L2 distance, or -NCC
+        if best is None or (cost, |dx|+|dy|) &lt; best:  # exact ties -> smallest shift
+            best = (cost, |dx|+|dy|), (dx, dy)</pre>
+<p>Two implementation details matter for speed. Since the interior margin is always larger than the
+displacement, the interior of the rolled image is just a slice of the original,
+<code>mov[my−dy : h−my−dy, mx−dx : w−mx−dx]</code>, so no copy is made per candidate (a unit test checks
+that this equals roll-then-crop). And the reference interior is normalised once per search, so each
+candidate costs one subtraction and one or two dot products over the interior.</p>
+
+<h3>The two metrics</h3>
+<p><b>L2 / Euclidean distance.</b> The square root of the summed squared pixel differences; I report the
+root <em>mean</em> square, which has the same minimiser but stays comparable between pyramid levels of
+different size.</p>
+<div class="math">L2(<var>A</var>, <var>B</var>) = √( Σ<sub><var>i</var></sub> (<var>A<sub>i</sub></var> − <var>B<sub>i</sub></var>)² )
+&nbsp;&nbsp;&nbsp;(minimised)</div>
+<p>L2 rewards two images for having the <em>same brightness</em> at every pixel. That is a problem here:
+the three plates were exposed through different filters, so the same object has different intensities
+in B, G and R — a red robe is bright in the red plate and dark in the blue one. L2 will happily trade
+structural alignment for a displacement that makes the average brightness match better.</p>
+<p><b>Normalized cross-correlation.</b> Subtract each image's mean, divide by its norm, and take the dot
+product of the two resulting unit vectors:</p>
+<div class="math">NCC(<var>A</var>, <var>B</var>) = ⟨ (<var>A</var> − μ<sub><var>A</var></sub>) / ‖<var>A</var> − μ<sub><var>A</var></sub>‖ ,
+(<var>B</var> − μ<sub><var>B</var></sub>) / ‖<var>B</var> − μ<sub><var>B</var></sub>‖ ⟩ ∈ [−1, 1]
+&nbsp;&nbsp;&nbsp;(maximised; I minimise −NCC)</div>
+<p>Because of the mean subtraction and the normalisation, NCC is invariant to any change
+<var>B</var> → α<var>B</var> + β of one channel's brightness and contrast, which is exactly the
+difference between two plates of the same scene taken through different filters. (The mean-subtracted,
+normalised L2 distance is 2 − 2·NCC, so a zero-normalised L2 would give identical results; the plain L2
+the assignment asks for does not.) NCC is what I use as the default metric; L2 results are always
+reported alongside.</p>
+
+<h3>Results on the small plates</h3>
+<div class="grid grid-3 "><figure><img src="media/single_ncc_cathedral.jpg" alt="cathedral — single-scale NCC, G (2, 5), R (3, 12)"><figcaption>cathedral — single-scale NCC, G (2, 5), R (3, 12)</figcaption></figure><figure><img src="media/single_ncc_monastery.jpg" alt="monastery — single-scale NCC, G (2, -3), R (2, 3)"><figcaption>monastery — single-scale NCC, G (2, -3), R (2, 3)</figcaption></figure><figure><img src="media/single_ncc_tobolsk.jpg" alt="tobolsk — single-scale NCC, G (3, 3), R (3, 6)"><figcaption>tobolsk — single-scale NCC, G (3, 3), R (3, 6)</figcaption></figure></div>
+<div class="tablewrap"><table><caption class='small'>Displacements applied to the G and R plates to align them with B; window [−15, 15]², 15 % border ignored.</caption><thead><tr><th>plate</th><th>L2: G (x, y)</th><th>L2: R (x, y)</th><th>NCC: G (x, y)</th><th>NCC: R (x, y)</th><th>L2 time (s)</th><th>NCC time (s)</th></tr></thead><tbody><tr><td>cathedral</td><td>(2, 5)</td><td>(3, 12)</td><td>(2, 5)</td><td>(3, 12)</td><td>0.03</td><td>0.06</td></tr><tr><td>monastery</td><td>(2, -3)</td><td>(2, 3)</td><td>(2, -3)</td><td>(2, 3)</td><td>0.03</td><td>0.06</td></tr><tr><td>tobolsk</td><td>(3, 3)</td><td>(3, 6)</td><td>(3, 3)</td><td>(3, 6)</td><td>0.03</td><td>0.06</td></tr></tbody></table></div>
+<p>Both metrics agree exactly on all three JPEG plates, and the results are pixel-accurate — the
+2× detail crops below show the same window before and after alignment. On these small images both
+metrics are also fast: about 0.06 s for the full 961-candidate search with NCC and 0.03 s with L2.</p>
+<div class="grid grid-6 crop"><figure><img src="media/crop_single_before_cathedral.jpg" alt="cathedral: before"><figcaption>cathedral: before</figcaption></figure><figure><img src="media/crop_single_after_cathedral.jpg" alt="cathedral: after"><figcaption>cathedral: after</figcaption></figure><figure><img src="media/crop_single_before_monastery.jpg" alt="monastery: before"><figcaption>monastery: before</figcaption></figure><figure><img src="media/crop_single_after_monastery.jpg" alt="monastery: after"><figcaption>monastery: after</figcaption></figure><figure><img src="media/crop_single_before_tobolsk.jpg" alt="tobolsk: before"><figcaption>tobolsk: before</figcaption></figure><figure><img src="media/crop_single_after_tobolsk.jpg" alt="tobolsk: after"><figcaption>tobolsk: after</figcaption></figure></div>
+<figure class=""><img src="media/cost_surface_cathedral.png" alt="NCC cost (−NCC, lower is better) over the 31 × 31 window for cathedral. Left: G→B, right: R→B; the white cross marks the minimum. The surface is smooth with a single well-defined minimum, which is what makes the coarse-to-fine strategy safe."><figcaption>NCC cost (−NCC, lower is better) over the 31 × 31 window for cathedral. Left: G→B, right: R→B; the white cross marks the minimum. The surface is smooth with a single well-defined minimum, which is what makes the coarse-to-fine strategy safe.</figcaption></figure>
+
+<h2 id="pyramid">4. Coarse-to-fine pyramid alignment</h2>
+<p>The exhaustive search does not scale to the full-size plates. The red plate of <i>melons</i> is
+displaced by 177 px, so the window would have to be at least [−180, 180]² — about 130 000 candidates, each
+scored on 6 million interior pixels: on the order of 10<sup>12</sup> operations per channel, tens of minutes
+per image in NumPy. An image pyramid solves this by finding the displacement on a tiny version of the
+image first, where 177 px is only 11 px, and then refining it level by level.</p>
+
+<h3>Building the pyramid</h3>
+<p>I implemented the pyramid myself. Each level is produced from the previous one by</p>
+<ol>
+  <li>a separable blur with the 5-tap binomial kernel [1 4 6 4 1] / 16, applied along rows and then
+      columns as weighted sums of shifted slices (pure NumPy, reflect-padded so the image mean is kept).
+      The kernel is a close approximation of a Gaussian with σ ≈ 1 px. This is the anti-aliasing step:
+      without it, subsampling folds fine texture into false low-frequency structure that misleads the
+      coarse search;</li>
+  <li>keeping every second row and column, so a level of size <em>h × w</em> becomes ⌊<em>h</em>/2⌋ × ⌊<em>w</em>/2⌋.</li>
+</ol>
+<p>The number of levels is chosen from the image size so that the coarsest level is at least 150 px on
+its short side: ⌊log₂(min(<em>h</em>, <em>w</em>) / 150)⌋ halvings, which is 4 for the TIFF
+plates (coarsest level 235 × 202 px) and 1 for the small JPEGs. A unit test checks that my
+downsampler agrees with scikit-image's anti-aliased <code>rescale</code> (correlation &gt; 0.99) while
+staying entirely home-made.</p>
+<svg class="diagram" viewBox="0 0 760 210" role="img" aria-label="Pyramid diagram">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+  <rect x="10" y="20" width="150" height="130" fill="#e8eef7" stroke="#1f4e8c"/><text x="85" y="170" font-size="12" text-anchor="middle">level 0: 3702 × 3209</text>
+  <rect x="200" y="52" width="75" height="65" fill="#e8eef7" stroke="#1f4e8c"/><text x="237" y="170" font-size="12" text-anchor="middle">level 1: 1851 × 1604</text>
+  <rect x="315" y="69" width="38" height="32" fill="#e8eef7" stroke="#1f4e8c"/><text x="334" y="170" font-size="12" text-anchor="middle">level 2</text>
+  <rect x="393" y="77" width="19" height="16" fill="#e8eef7" stroke="#1f4e8c"/><text x="402" y="190" font-size="12" text-anchor="middle">level 3</text>
+  <rect x="452" y="81" width="10" height="8" fill="#c9d7ee" stroke="#1f4e8c"/><text x="470" y="170" font-size="12" text-anchor="start">level 4: 231 × 200</text>
+  <line x1="165" y1="85" x2="195" y2="85" stroke="#555" marker-end="url(#arr)"/><text x="180" y="78" font-size="11" text-anchor="middle">blur, ↓2</text>
+  <line x1="280" y1="85" x2="310" y2="85" stroke="#555" marker-end="url(#arr)"/>
+  <line x1="358" y1="85" x2="388" y2="85" stroke="#555" marker-end="url(#arr)"/>
+  <line x1="417" y1="85" x2="447" y2="85" stroke="#555" marker-end="url(#arr)"/>
+  <path d="M457,110 Q457,195 85,195" fill="none" stroke="#8a1c1c" stroke-width="1.5" marker-end="url(#arr)" stroke-dasharray="5 4"/>
+  <text x="300" y="205" font-size="12" fill="#8a1c1c" text-anchor="middle">search ±19 at the coarsest level, then double the estimate and refine ±9, ±4, ±3, ±3 on the way down</text>
+  <text x="600" y="60" font-size="12" fill="#333">a shift of 177 px at level 0</text>
+  <text x="600" y="78" font-size="12" fill="#333">is 11 px at level 4</text>
+  <text x="600" y="110" font-size="12" fill="#333">scoring a level costs 1/4</text>
+  <text x="600" y="128" font-size="12" fill="#333">of the level below it</text>
+</svg>
+
+<h3>The coarse-to-fine search</h3>
+<p>The search is the single-scale routine from Section 3, run once per level from the coarsest to the
+finest:</p>
+<ol>
+  <li><b>Coarsest level:</b> exhaustive search around (0, 0) with radius 19. Because a
+      displacement of <em>d</em> pixels at full resolution is only <em>d</em> / 2<sup>4</sup> at level 4,
+      this window covers ±304 px at full resolution — comfortably more than the largest
+      displacement in the collection (about 180 px). (The radius is 15 by default and is widened
+      automatically so that the window always covers 8 % of the image size.)</li>
+  <li><b>Every finer level:</b> double the estimate from the level above and search a small window
+      around it. Doubling an integer estimate is off by at most about one pixel, plus the half-pixel
+      phase of the subsampling, so a radius of 3 is sufficient once a level has succeeded; I use a
+      shrinking schedule (19 → 9 → 4 → 3 → 3) to tolerate a slightly wrong coarse estimate at almost no
+      cost.</li>
+</ol>
+<p>The reference channel's pyramid is built once and reused for both G and R. The whole procedure is
+equivalent to the recursive formulation suggested in the assignment (align the half-size images, then
+refine), written as a loop so that every level's estimate can be logged; here is the trace for the
+melons red plate:</p>
+<div class="tablewrap"><table><caption class='small'>Coarse-to-fine trace for melons, R→B (final displacement (14, 178)). Each level doubles the previous estimate and refines it.</caption><thead><tr><th>level</th><th>size (w × h)</th><th>scale</th><th>window centre</th><th>radius</th><th>best (x, y)</th><th>NCC</th><th>time (s)</th></tr></thead><tbody><tr><td>4</td><td>235 × 202</td><td>1/16</td><td>(0, 0)</td><td>±19</td><td>(1, 11)</td><td>0.9239</td><td>0.038</td></tr><tr><td>3</td><td>471 × 405</td><td>1/8</td><td>(2, 22)</td><td>±9</td><td>(2, 22)</td><td>0.9164</td><td>0.018</td></tr><tr><td>2</td><td>942 × 810</td><td>1/4</td><td>(4, 44)</td><td>±4</td><td>(3, 45)</td><td>0.9109</td><td>0.018</td></tr><tr><td>1</td><td>1885 × 1620</td><td>1/2</td><td>(6, 90)</td><td>±3</td><td>(7, 89)</td><td>0.9057</td><td>0.075</td></tr><tr><td>0</td><td>3770 × 3241</td><td>1/1</td><td>(14, 178)</td><td>±3</td><td>(14, 178)</td><td>0.9010</td><td>0.389</td></tr></tbody></table></div>
+<p>At every level the estimate lands within the refinement window of the previous one, and the NCC of
+the winning candidate is high (it drops slightly at finer levels simply because finer levels contain
+more noise and fine detail). The finest level dominates the cost: about 49 candidates over
+6 million pixels each. A full-size plate takes 1.5 s on average and 1.7 s at
+most for both channels, including reading the 70 MB TIFF — about 500× faster than the brute-force
+window would be.</p>
+
+<h3>Results on all 14 provided plates</h3>
+<div class="grid grid-3 "><figure><img src="media/pyr_ncc_cathedral.jpg" alt="cathedral — G (2, 5), R (3, 12), 0.1 s"><figcaption>cathedral — G (2, 5), R (3, 12), 0.1 s</figcaption></figure><figure><img src="media/pyr_ncc_monastery.jpg" alt="monastery — G (2, -3), R (2, 3), 0.1 s"><figcaption>monastery — G (2, -3), R (2, 3), 0.1 s</figcaption></figure><figure><img src="media/pyr_ncc_tobolsk.jpg" alt="tobolsk — G (3, 3), R (3, 6), 0.1 s"><figcaption>tobolsk — G (3, 3), R (3, 6), 0.1 s</figcaption></figure><figure><img src="media/pyr_ncc_church.jpg" alt="church — G (4, 25), R (-4, 58), 1.7 s"><figcaption>church — G (4, 25), R (-4, 58), 1.7 s</figcaption></figure><figure><img src="media/pyr_ncc_emir.jpg" alt="emir — G (24, 49), R (44, 64), 1.6 s"><figcaption>emir — G (24, 49), R (44, 64), 1.6 s</figcaption></figure><figure><img src="media/pyr_ncc_harvesters.jpg" alt="harvesters — G (17, 60), R (14, 124), 1.5 s"><figcaption>harvesters — G (17, 60), R (14, 124), 1.5 s</figcaption></figure><figure><img src="media/pyr_ncc_icon.jpg" alt="icon — G (17, 41), R (23, 89), 1.4 s"><figcaption>icon — G (17, 41), R (23, 89), 1.4 s</figcaption></figure><figure><img src="media/pyr_ncc_ilemselga.jpg" alt="ilemselga — G (7, 40), R (11, 130), 1.6 s"><figcaption>ilemselga — G (7, 40), R (11, 130), 1.6 s</figcaption></figure><figure><img src="media/pyr_ncc_melons.jpg" alt="melons — G (10, 81), R (14, 178), 1.6 s"><figcaption>melons — G (10, 81), R (14, 178), 1.6 s</figcaption></figure><figure><img src="media/pyr_ncc_religous_painting.jpg" alt="religious_painting — G (3, 28), R (7, 68), 1.6 s"><figcaption>religious_painting — G (3, 28), R (7, 68), 1.6 s</figcaption></figure><figure><img src="media/pyr_ncc_self_portrait.jpg" alt="self_portrait — G (29, 79), R (37, 176), 1.6 s"><figcaption>self_portrait — G (29, 79), R (37, 176), 1.6 s</figcaption></figure><figure><img src="media/pyr_ncc_siren.jpg" alt="siren — G (-6, 49), R (-25, 96), 1.5 s"><figcaption>siren — G (-6, 49), R (-25, 96), 1.5 s</figcaption></figure><figure><img src="media/pyr_ncc_three_generations.jpg" alt="three_generations — G (14, 52), R (11, 111), 1.3 s"><figcaption>three_generations — G (14, 52), R (11, 111), 1.3 s</figcaption></figure><figure><img src="media/pyr_ncc_wharf.jpg" alt="wharf — G (-7, 15), R (-16, 82), 1.4 s"><figcaption>wharf — G (-7, 15), R (-16, 82), 1.4 s</figcaption></figure></div>
+<div class="tablewrap"><table><caption class='small'>Pyramid alignment of the 14 provided plates with raw pixel intensities. “agree”: L2 and NCC within 2 px of each other; red cells disagree.</caption><thead><tr><th>plate</th><th>NCC: G (x, y)</th><th>NCC: R (x, y)</th><th>L2: G (x, y)</th><th>L2: R (x, y)</th><th>NCC time (s)</th><th>L2 time (s)</th><th>agree</th></tr></thead><tbody><tr><td>cathedral</td><td>(2, 5)</td><td>(3, 12)</td><td>(2, 5)</td><td>(3, 12)</td><td>0.05</td><td>0.02</td><td>✓</td></tr><tr><td>monastery</td><td>(2, -3)</td><td>(2, 3)</td><td>(2, -3)</td><td>(2, 3)</td><td>0.05</td><td>0.02</td><td>✓</td></tr><tr><td>tobolsk</td><td>(3, 3)</td><td>(3, 6)</td><td>(3, 3)</td><td>(3, 6)</td><td>0.06</td><td>0.03</td><td>✓</td></tr><tr><td>church</td><td>(4, 25)</td><td>(-4, 58)</td><td>(4, 25)</td><td class="bad">(401, 78)</td><td>1.67</td><td>1.17</td><td class="bad">≠</td></tr><tr><td>emir</td><td>(24, 49)</td><td>(44, 64)</td><td>(24, 49)</td><td>(44, 66)</td><td>1.65</td><td>1.08</td><td>✓</td></tr><tr><td>harvesters</td><td>(17, 60)</td><td>(14, 124)</td><td>(17, 59)</td><td>(13, 124)</td><td>1.46</td><td>1.18</td><td>✓</td></tr><tr><td>icon</td><td>(17, 41)</td><td>(23, 89)</td><td>(17, 41)</td><td>(23, 89)</td><td>1.39</td><td>0.88</td><td>✓</td></tr><tr><td>ilemselga</td><td>(7, 40)</td><td>(11, 130)</td><td>(7, 40)</td><td>(11, 130)</td><td>1.59</td><td>1.09</td><td>✓</td></tr><tr><td>melons</td><td>(10, 81)</td><td>(14, 178)</td><td>(10, 81)</td><td>(14, 178)</td><td>1.61</td><td>1.24</td><td>✓</td></tr><tr><td>religious_painting</td><td>(3, 28)</td><td>(7, 68)</td><td>(3, 28)</td><td>(7, 69)</td><td>1.65</td><td>1.19</td><td>✓</td></tr><tr><td>self_portrait</td><td>(29, 79)</td><td>(37, 176)</td><td>(29, 78)</td><td>(37, 176)</td><td>1.59</td><td>0.91</td><td>✓</td></tr><tr><td>siren</td><td>(-6, 49)</td><td>(-25, 96)</td><td>(-6, 50)</td><td>(-25, 96)</td><td>1.53</td><td>1.13</td><td>✓</td></tr><tr><td>three_generations</td><td>(14, 52)</td><td>(11, 111)</td><td>(14, 52)</td><td>(11, 111)</td><td>1.30</td><td>1.13</td><td>✓</td></tr><tr><td>wharf</td><td>(-7, 15)</td><td>(-16, 82)</td><td>(-7, 15)</td><td>(-16, 82)</td><td>1.35</td><td>0.94</td><td>✓</td></tr></tbody></table></div>
+<p>With NCC on raw pixel values every plate except <i>emir</i> is aligned to the pixel; the 2× detail
+crops below compare the same window before and after alignment. L2 agrees with NCC to within one pixel
+on twelve plates, misaligns <i>emir</i> in the same way, and fails badly on <i>church</i> (Section 6).
+The one-pixel disagreements between the two metrics on a few plates are not errors of either metric:
+the plates are not related by a pure translation (they differ in scale by a few tenths of a percent,
+see Section 7.6), so the best integer translation genuinely depends on how the metric weights different
+regions of the image.</p>
+<div class="grid grid-6 crop"><figure><img src="media/crop_pyr_before_church.jpg" alt="church: before"><figcaption>church: before</figcaption></figure><figure><img src="media/crop_pyr_after_church.jpg" alt="church: after"><figcaption>church: after</figcaption></figure><figure><img src="media/crop_pyr_before_emir.jpg" alt="emir: before"><figcaption>emir: before</figcaption></figure><figure><img src="media/crop_pyr_after_emir.jpg" alt="emir: after"><figcaption>emir: after</figcaption></figure><figure><img src="media/crop_pyr_before_harvesters.jpg" alt="harvesters: before"><figcaption>harvesters: before</figcaption></figure><figure><img src="media/crop_pyr_after_harvesters.jpg" alt="harvesters: after"><figcaption>harvesters: after</figcaption></figure><figure><img src="media/crop_pyr_before_icon.jpg" alt="icon: before"><figcaption>icon: before</figcaption></figure><figure><img src="media/crop_pyr_after_icon.jpg" alt="icon: after"><figcaption>icon: after</figcaption></figure><figure><img src="media/crop_pyr_before_ilemselga.jpg" alt="ilemselga: before"><figcaption>ilemselga: before</figcaption></figure><figure><img src="media/crop_pyr_after_ilemselga.jpg" alt="ilemselga: after"><figcaption>ilemselga: after</figcaption></figure><figure><img src="media/crop_pyr_before_melons.jpg" alt="melons: before"><figcaption>melons: before</figcaption></figure><figure><img src="media/crop_pyr_after_melons.jpg" alt="melons: after"><figcaption>melons: after</figcaption></figure><figure><img src="media/crop_pyr_before_religous_painting.jpg" alt="religious_painting: before"><figcaption>religious_painting: before</figcaption></figure><figure><img src="media/crop_pyr_after_religous_painting.jpg" alt="religious_painting: after"><figcaption>religious_painting: after</figcaption></figure><figure><img src="media/crop_pyr_before_self_portrait.jpg" alt="self_portrait: before"><figcaption>self_portrait: before</figcaption></figure><figure><img src="media/crop_pyr_after_self_portrait.jpg" alt="self_portrait: after"><figcaption>self_portrait: after</figcaption></figure><figure><img src="media/crop_pyr_before_siren.jpg" alt="siren: before"><figcaption>siren: before</figcaption></figure><figure><img src="media/crop_pyr_after_siren.jpg" alt="siren: after"><figcaption>siren: after</figcaption></figure><figure><img src="media/crop_pyr_before_three_generations.jpg" alt="three_generations: before"><figcaption>three_generations: before</figcaption></figure><figure><img src="media/crop_pyr_after_three_generations.jpg" alt="three_generations: after"><figcaption>three_generations: after</figcaption></figure><figure><img src="media/crop_pyr_before_wharf.jpg" alt="wharf: before"><figcaption>wharf: before</figcaption></figure><figure><img src="media/crop_pyr_after_wharf.jpg" alt="wharf: after"><figcaption>wharf: after</figcaption></figure></div>
+
+<h2 id="extra">5. Extra plates from the Library of Congress</h2>
+<p>I downloaded 4 additional full-resolution negatives from the LoC. The web pages block scripted
+clients, but the collection's JSON API (<code>https://www.loc.gov/collections/prokudin-gorskii/?fo=json</code>)
+returns for every item the id of its <code>prok</code> resource, and the master scan is served at
+<code>https://tile.loc.gov/storage-services/master/pnp/prok/NNN00/NNNNNu.tif</code> (8-bit, ≈36 MB).
+<code>main.py download</code> fetches them and writes a credits file. I picked plates that stress
+different aspects of the method:</p>
+<ul><li><b>isfandiyar</b> — <i>Isfandiyar, Khan of the Russian protectorate of Khorezm (Khiva), three-quarter length portrait, in official robes, seated on chair, outdoors</i> (1910). A portrait in saturated robes, like the Emir of Bukhara: the three plates have very different brightness, which stresses intensity-based metrics. <a href="https://www.loc.gov/item/2018681316/">LoC item</a>, digital id prok.00151.</li><li><b>karlinskii</b> — <i>Pinkhus Karlinskii, 84 years old, 66 years of service. Supervisor of the Chernigov floodgate</i> (1909). A standing portrait with water and sky behind it: large smooth regions with little texture. <a href="https://www.loc.gov/item/2018678762/">LoC item</a>, digital id prok.00882.</li><li><b>peasant_girls</b> — <i>Peasant girls [Russian Empire]</i> (1909). Three girls in brightly patterned clothes: fine texture and strong colour differences between plates. <a href="https://www.loc.gov/item/2018678943/">LoC item</a>, digital id prok.01043.</li><li><b>vitebsk_cathedral</b> — <i>Vitebsk. Uspenski (Assumption) cathedral</i> (1912). Architecture with straight edges and a large sky: a landscape-type scene to complement the portraits. <a href="https://www.loc.gov/item/2018680038/">LoC item</a>, digital id prok.00428.</li></ul>
+<p>All four align with the same fixed parameters; the two metrics agree to within two pixels.
+<i>karlinskii</i> is interesting because half of the frame is moving water, which no longer matches
+between exposures — the search still locks onto the static parts of the scene.</p>
+<div class="grid grid-2 "><figure><img src="media/pyr_ncc_isfandiyar.jpg" alt="isfandiyar — G (74, 42), R (123, 120), 1.1 s"><figcaption>isfandiyar — G (74, 42), R (123, 120), 1.1 s</figcaption></figure><figure><img src="media/pyr_ncc_karlinskii.jpg" alt="karlinskii — G (-23, 52), R (-55, 107), 1.2 s"><figcaption>karlinskii — G (-23, 52), R (-55, 107), 1.2 s</figcaption></figure><figure><img src="media/pyr_ncc_peasant_girls.jpg" alt="peasant_girls — G (10, -16), R (18, 11), 1.2 s"><figcaption>peasant_girls — G (10, -16), R (18, 11), 1.2 s</figcaption></figure><figure><img src="media/pyr_ncc_vitebsk_cathedral.jpg" alt="vitebsk_cathedral — G (-9, 37), R (-21, 81), 1.0 s"><figcaption>vitebsk_cathedral — G (-9, 37), R (-21, 81), 1.0 s</figcaption></figure></div>
+<div class="tablewrap"><table><thead><tr><th>plate</th><th>NCC: G (x, y)</th><th>NCC: R (x, y)</th><th>L2: G (x, y)</th><th>L2: R (x, y)</th><th>NCC time (s)</th><th>agree</th></tr></thead><tbody><tr><td>isfandiyar</td><td>(74, 42)</td><td>(123, 120)</td><td>(74, 43)</td><td>(123, 120)</td><td>1.13</td><td>✓</td></tr><tr><td>karlinskii</td><td>(-23, 52)</td><td>(-55, 107)</td><td>(-22, 52)</td><td>(-54, 107)</td><td>1.20</td><td>✓</td></tr><tr><td>peasant_girls</td><td>(10, -16)</td><td>(18, 11)</td><td>(10, -16)</td><td>(18, 11)</td><td>1.20</td><td>✓</td></tr><tr><td>vitebsk_cathedral</td><td>(-9, 37)</td><td>(-21, 81)</td><td>(-9, 37)</td><td>(-21, 81)</td><td>1.00</td><td>✓</td></tr></tbody></table></div>
+<div class="grid grid-4 crop"><figure><img src="media/crop_pyr_before_isfandiyar.jpg" alt="isfandiyar: before"><figcaption>isfandiyar: before</figcaption></figure><figure><img src="media/crop_pyr_after_isfandiyar.jpg" alt="isfandiyar: after"><figcaption>isfandiyar: after</figcaption></figure><figure><img src="media/crop_pyr_before_karlinskii.jpg" alt="karlinskii: before"><figcaption>karlinskii: before</figcaption></figure><figure><img src="media/crop_pyr_after_karlinskii.jpg" alt="karlinskii: after"><figcaption>karlinskii: after</figcaption></figure><figure><img src="media/crop_pyr_before_peasant_girls.jpg" alt="peasant_girls: before"><figcaption>peasant_girls: before</figcaption></figure><figure><img src="media/crop_pyr_after_peasant_girls.jpg" alt="peasant_girls: after"><figcaption>peasant_girls: after</figcaption></figure><figure><img src="media/crop_pyr_before_vitebsk_cathedral.jpg" alt="vitebsk_cathedral: before"><figcaption>vitebsk_cathedral: before</figcaption></figure><figure><img src="media/crop_pyr_after_vitebsk_cathedral.jpg" alt="vitebsk_cathedral: after"><figcaption>vitebsk_cathedral: after</figcaption></figure></div>
+<p class="small">Credit for all four: Prokudin-Gorskii photograph collection, Library of Congress, Prints and
+Photographs Division.</p>
+
+<h2 id="failures">6. Failure analysis</h2>
+<h3>Emir of Bukhara with raw pixel metrics</h3>
+<p>Both metrics misalign the red plate of <i>emir</i>: NCC gives R = (44, 64) and L2 gives
+R = (44, 66), while the correct displacement is (40, 107). (The green plate,
+G = (24, 49), is fine.) The reason is the one the assignment hints at: the emir's robe is bright
+blue with dark patterns, so it is bright in the blue plate and dark in the red one, while his face,
+the wooden doors and the floor are the opposite. The relation between the two plates' intensities is not
+a single brightness change but flips sign from region to region. L2 cannot cope with that at all, and
+even NCC's affine invariance is not enough: the anti-correlated robe pulls the correlation down at the
+correct displacement, and a wrong displacement wins. The trace shows the problem starts at the coarsest
+level, where the best NCC is only about 0.28, and every finer level then refines a wrong answer.</p>
+<div class="tablewrap"><table><caption class='small'>emir, R→B with raw-pixel NCC: already at the coarsest level the best NCC is only ≈0.28 and the estimate is wrong; every finer level refines a wrong answer.</caption><thead><tr><th>level</th><th>window centre</th><th>radius</th><th>best (x, y)</th><th>NCC</th></tr></thead><tbody><tr><td>4</td><td>(0, 0)</td><td>±19</td><td>(3, 4)</td><td>0.2789</td></tr><tr><td>3</td><td>(6, 8)</td><td>±9</td><td>(6, 8)</td><td>0.2620</td></tr><tr><td>2</td><td>(12, 16)</td><td>±4</td><td>(11, 16)</td><td>0.2485</td></tr><tr><td>1</td><td>(22, 32)</td><td>±3</td><td>(22, 32)</td><td>0.2382</td></tr><tr><td>0</td><td>(44, 64)</td><td>±3</td><td>(44, 64)</td><td>0.2352</td></tr></tbody></table></div>
+<div class="grid grid-3 "><figure><img src="media/pyr_ncc_emir.jpg" alt="emir, raw-pixel NCC: R (44, 64) — misaligned"><figcaption>emir, raw-pixel NCC: R (44, 64) — misaligned</figcaption></figure><figure><img src="media/crop_pyr_after_emir.jpg" alt="detail of the raw-pixel result: the red plate is off by tens of pixels"><figcaption>detail of the raw-pixel result: the red plate is off by tens of pixels</figcaption></figure><figure><img src="media/crop_grad_after_emir.jpg" alt="same detail with gradient features: R (40, 107)"><figcaption>same detail with gradient features: R (40, 107)</figcaption></figure></div>
+<p>The fix is to compare something that does not care about the sign of the contrast — the gradient
+magnitude — which is the first bell and whistle below and aligns <i>emir</i> correctly with both metrics.</p>
+
+<h3>Church with L2</h3>
+<p>The second failure is specific to L2. On <i>church</i> the L2 search for the red plate runs to the
++<em>x</em> edge of the window at <em>every</em> level — the RMSE keeps decreasing the further the red
+plate is pushed to the right — and ends at R = (401, 78), hundreds of pixels off. The scene is a bright
+sky over dark water; sliding the red plate sideways shifts its bright and dark areas over the reference in
+a way that lowers the absolute intensity difference without any structure lining up. NCC, which only
+cares about the correlation of the deviations from the mean, finds (−4, 58) without difficulty.</p>
+<div class="tablewrap"><table><caption class='small'>church, R→B with L2: the best candidate sits on the +x edge of the window at every level.</caption><thead><tr><th>level</th><th>window centre</th><th>radius</th><th>best (x, y)</th><th>RMSE</th></tr></thead><tbody><tr><td>4</td><td>(0, 0)</td><td>±19</td><td>(19, 5)</td><td>0.2277</td></tr><tr><td>3</td><td>(38, 10)</td><td>±9</td><td>(47, 9)</td><td>0.2287</td></tr><tr><td>2</td><td>(94, 18)</td><td>±4</td><td>(98, 19)</td><td>0.2303</td></tr><tr><td>1</td><td>(196, 38)</td><td>±3</td><td>(199, 39)</td><td>0.2316</td></tr><tr><td>0</td><td>(398, 78)</td><td>±3</td><td>(401, 78)</td><td>0.2326</td></tr></tbody></table></div>
+<div class="grid grid-2 "><figure><img src="media/pyr_ncc_church.jpg" alt="church, NCC: R (-4, 58) — correct"><figcaption>church, NCC: R (-4, 58) — correct</figcaption></figure><figure><img src="media/pyr_l2_church.jpg" alt="church, L2: R (401, 78) — the search ran away to the window edge at every level"><figcaption>church, L2: R (401, 78) — the search ran away to the window edge at every level</figcaption></figure></div>
+<p>In total, raw-pixel NCC therefore fails on 1 of the 18 plates (<i>emir</i>) and raw-pixel L2 on 2
+(<i>emir</i>, <i>church</i>). Everything else on this page uses NCC.</p>
+
+<h2 id="bells">7. Bells and whistles</h2>
+
+<h3 id="grad">7.1 Better features: gradient magnitude</h3>
+<p><b>Motivation.</b> The failure on <i>emir</i> is a failure of intensity as a feature. Edges, on the
+other hand, are in the same place in all three plates whatever their brightness or the sign of their
+contrast.</p>
+<p><b>Method.</b> Before scoring, both channels are replaced by their Sobel gradient magnitude: the image
+is smoothed with the same binomial kernel (σ ≈ 1 px, to suppress film grain), filtered with
+<em>G<sub>x</sub></em> = [1 2 1]ᵀ/4 · [−1 0 1]/2 and its transpose (written as shifted-slice arithmetic),
+and √(<em>g<sub>x</sub></em>² + <em>g<sub>y</sub></em>²) is clipped at its 99th percentile and scaled to
+[0, 1], so a few very strong edges (plate borders, specular highlights) cannot dominate. The magnitude is
+the same whether an edge goes from dark to bright or from bright to dark, which is exactly the invariance
+the robe needs. The feature is recomputed at every pyramid level (one small convolution per level) and
+NCC is then computed on the feature maps exactly as before.</p>
+<div class="grid grid-2 "><figure><img src="media/pyr_ncc_emir.jpg" alt="before: raw pixels, R (44, 64)"><figcaption>before: raw pixels, R (44, 64)</figcaption></figure><figure><img src="media/pyr_grad_ncc_emir.jpg" alt="after: gradient magnitude, R (40, 107)"><figcaption>after: gradient magnitude, R (40, 107)</figcaption></figure></div>
+<p><b>Results.</b> <i>emir</i> aligns correctly (R = (40, 107), G = (23, 49)) and so does every other
+plate; L2 on gradient features also recovers <i>church</i>. Gradient features cost about
+2.7 s per plate instead of 1.5 s, mostly for the percentile computation. The table
+compares raw-pixel and gradient NCC on all 18 plates; apart from <i>emir</i> they agree to within
+two pixels, and all further bells and whistles use gradient NCC as the alignment method.</p>
+<div class="tablewrap"><table><caption class='small'>Pyramid alignment with raw intensities vs. Sobel gradient magnitude (both NCC). Red: the two differ by more than 2 px.</caption><thead><tr><th>plate</th><th>raw NCC: G</th><th>gradient NCC: G</th><th>raw NCC: R</th><th>gradient NCC: R</th><th>raw time (s)</th><th>gradient time (s)</th></tr></thead><tbody><tr><td>cathedral</td><td>(2, 5)</td><td>(2, 5)</td><td>(3, 12)</td><td>(3, 12)</td><td>0.1</td><td>0.1</td></tr><tr><td>monastery</td><td>(2, -3)</td><td>(2, -3)</td><td>(2, 3)</td><td>(2, 3)</td><td>0.1</td><td>0.1</td></tr><tr><td>tobolsk</td><td>(3, 3)</td><td>(3, 3)</td><td>(3, 6)</td><td>(3, 7)</td><td>0.1</td><td>0.1</td></tr><tr><td>church</td><td>(4, 25)</td><td>(4, 25)</td><td>(-4, 58)</td><td>(-4, 58)</td><td>1.7</td><td>2.4</td></tr><tr><td>emir</td><td>(24, 49)</td><td>(23, 49)</td><td>(44, 64)</td><td class="bad">(40, 107)</td><td>1.6</td><td>2.4</td></tr><tr><td>harvesters</td><td>(17, 60)</td><td>(17, 60)</td><td>(14, 124)</td><td>(14, 123)</td><td>1.5</td><td>2.9</td></tr><tr><td>icon</td><td>(17, 41)</td><td>(17, 42)</td><td>(23, 89)</td><td>(23, 90)</td><td>1.4</td><td>3.1</td></tr><tr><td>ilemselga</td><td>(7, 40)</td><td>(7, 40)</td><td>(11, 130)</td><td>(11, 131)</td><td>1.6</td><td>3.0</td></tr><tr><td>melons</td><td>(10, 81)</td><td>(10, 80)</td><td>(14, 178)</td><td>(13, 177)</td><td>1.6</td><td>2.7</td></tr><tr><td>religious_painting</td><td>(3, 28)</td><td>(1, 29)</td><td>(7, 68)</td><td>(6, 69)</td><td>1.6</td><td>2.7</td></tr><tr><td>self_portrait</td><td>(29, 79)</td><td>(29, 78)</td><td>(37, 176)</td><td>(37, 176)</td><td>1.6</td><td>2.7</td></tr><tr><td>siren</td><td>(-6, 49)</td><td>(-6, 49)</td><td>(-25, 96)</td><td>(-24, 96)</td><td>1.5</td><td>2.6</td></tr><tr><td>three_generations</td><td>(14, 52)</td><td>(13, 53)</td><td>(11, 111)</td><td>(9, 111)</td><td>1.3</td><td>2.9</td></tr><tr><td>wharf</td><td>(-7, 15)</td><td>(-7, 15)</td><td>(-16, 82)</td><td>(-16, 82)</td><td>1.4</td><td>2.4</td></tr><tr><td>isfandiyar</td><td>(74, 42)</td><td>(74, 42)</td><td>(123, 120)</td><td>(123, 120)</td><td>1.1</td><td>2.5</td></tr><tr><td>karlinskii</td><td>(-23, 52)</td><td>(-23, 54)</td><td>(-55, 107)</td><td>(-56, 108)</td><td>1.2</td><td>2.7</td></tr><tr><td>peasant_girls</td><td>(10, -16)</td><td>(10, -15)</td><td>(18, 11)</td><td>(16, 11)</td><td>1.2</td><td>2.2</td></tr><tr><td>vitebsk_cathedral</td><td>(-9, 37)</td><td>(-8, 37)</td><td>(-21, 81)</td><td>(-21, 81)</td><td>1.0</td><td>1.8</td></tr></tbody></table></div>
+
+<h3 id="crop">7.2 Automatic cropping</h3>
+<p><b>Motivation.</b> Aligned images have three kinds of bad border: the white scanner margin and the black
+film edge of each plate, the strips that <code>np.roll</code> wraps around from the opposite side, and the
+one-sided fringes where a shifted plate no longer covers the frame. Rather than cutting a fixed margin, I
+detect them.</p>
+<p><b>Method.</b> Three estimates are computed per side, combined by taking the maximum, and capped at 12 %
+of the dimension:</p>
+<ol>
+  <li><b>Scan borders on each raw plate.</b> Scanning inward from an edge, a row (or column) is
+      "border-like" if at least 50 % of its pixels are below 0.10 and 50 % lie within 0.015 of the row
+      median (a dark <em>and flat</em> film edge — dark foliage is dark but textured), or if at least 80 % are
+      above 0.88 and 95 % lie within 0.015 of the median (a saturated, flat scanner margin — a bright sky
+      is bright but not that flat). The border must start at the edge, and it extends to the last
+      border-like row whose running fraction of border-like rows is still 60 % (the film edge is slightly
+      tilted, so a few mixed rows are tolerated), plus an 8 px pad.</li>
+  <li><b>Shift strips.</b> Rolling a plate by (dx, dy) moves its own border by the same amount and wraps
+      the leaving band to the other side; both are known exactly. In the reference frame the invalid band
+      on top is border<sub>top</sub> + dy and at the bottom border<sub>bottom</sub> − dy (likewise for
+      x), maximised over the three channels.</li>
+  <li><b>Channel disagreement</b> (a safety net). Where the picture is good, the <em>edges</em> of the
+      three aligned channels coincide, whatever their colours; along a bad border they do not. Each channel
+      is z-scored, its Sobel magnitude computed, and the mean pairwise difference between the three
+      magnitude maps is taken; rows and columns whose median disagreement exceeds the interior's median by
+      4 MAD (and 1.5×) are trimmed, but only the band that starts at the edge (an isolated disagreeing row
+      deep inside the picture is content, not border). My first version compared z-scored
+      <em>intensities</em> instead of gradients and trimmed every coloured sky to the cap — a colourful
+      region disagrees in intensity even when it is perfectly aligned.</li>
+</ol>
+<div class="grid grid-3 "><figure><img src="media/bells_crop_overlay_emir.jpg" alt="emir: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 139/68/233/139 px)"><figcaption>emir: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 139/68/233/139 px)</figcaption></figure><figure><img src="media/bells_crop_overlay_self_portrait.jpg" alt="self_portrait: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 194/69/350/162 px)"><figcaption>self_portrait: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 194/69/350/162 px)</figcaption></figure><figure><img src="media/bells_crop_overlay_church.jpg" alt="church: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 71/19/80/97 px)"><figcaption>church: cyan = scan borders + shift strips, magenta = channel disagreement, yellow = final crop (t/b/l/r = 71/19/80/97 px)</figcaption></figure></div>
+<div class="grid grid-2 "><figure><img src="media/bells_aligned_emir.jpg" alt="emir: aligned (gradient NCC), uncropped"><figcaption>emir: aligned (gradient NCC), uncropped</figcaption></figure><figure><img src="media/bells_cropped_emir.jpg" alt="emir: after automatic cropping"><figcaption>emir: after automatic cropping</figcaption></figure></div>
+<div class="tablewrap"><table><caption class='small'>Pixels removed on each side by the automatic crop (cap: 12 % per side).</caption><thead><tr><th>plate</th><th>top</th><th>bottom</th><th>left</th><th>right</th><th>area removed</th></tr></thead><tbody><tr><td>cathedral</td><td>24</td><td>21</td><td>30</td><td>28</td><td>26.1 %</td></tr><tr><td>monastery</td><td>25</td><td>35</td><td>30</td><td>24</td><td>29.0 %</td></tr><tr><td>tobolsk</td><td>19</td><td>19</td><td>31</td><td>24</td><td>23.5 %</td></tr><tr><td>church</td><td>71</td><td>19</td><td>80</td><td>97</td><td>7.5 %</td></tr><tr><td>emir</td><td>139</td><td>68</td><td>233</td><td>139</td><td>15.9 %</td></tr><tr><td>harvesters</td><td>152</td><td>51</td><td>167</td><td>209</td><td>15.9 %</td></tr><tr><td>icon</td><td>174</td><td>40</td><td>242</td><td>137</td><td>16.1 %</td></tr><tr><td>ilemselga</td><td>204</td><td>122</td><td>262</td><td>230</td><td>21.6 %</td></tr><tr><td>melons</td><td>190</td><td>13</td><td>171</td><td>210</td><td>15.7 %</td></tr><tr><td>religious_painting</td><td>121</td><td>55</td><td>133</td><td>177</td><td>13.3 %</td></tr><tr><td>self_portrait</td><td>194</td><td>69</td><td>350</td><td>162</td><td>20.4 %</td></tr><tr><td>siren</td><td>176</td><td>117</td><td>229</td><td>219</td><td>19.7 %</td></tr><tr><td>three_generations</td><td>142</td><td>39</td><td>154</td><td>215</td><td>15.0 %</td></tr><tr><td>wharf</td><td>141</td><td>21</td><td>124</td><td>219</td><td>13.7 %</td></tr><tr><td>isfandiyar</td><td>154</td><td>21</td><td>233</td><td>108</td><td>14.2 %</td></tr><tr><td>karlinskii</td><td>154</td><td>390</td><td>136</td><td>192</td><td>24.0 %</td></tr><tr><td>peasant_girls</td><td>78</td><td>81</td><td>130</td><td>118</td><td>11.3 %</td></tr><tr><td>vitebsk_cathedral</td><td>151</td><td>86</td><td>139</td><td>244</td><td>16.7 %</td></tr></tbody></table></div>
+<p><b>Limitations.</b> The result is deliberately conservative. On <i>siren</i> (lilacs) the dark, textured
+left margin still costs about 5 % of the width, and where the film edge is adjacent to dark scene content the
+crop can overshoot by a few percent; the 12 % cap bounds the damage.</p>
+
+<h3 id="contrast">7.3 Automatic contrast</h3>
+<p><b>Method.</b> A joint linear stretch: the 0.5th percentile of all channel values is mapped to 0 and the
+99.5th to 1, clipping the rest. Using the <em>same</em> two numbers for all three channels keeps the channel
+ratios, and therefore the colours, unchanged — stretching each channel separately would be a hidden white
+balance. The stretch has to run after cropping: the saturated margins would otherwise pin both
+percentiles at 0 and 1 and nothing would happen. I also tried CLAHE (scikit-image's
+<code>equalize_adapthist</code>); it produces dramatic but unnatural, haloed results on these scans, so the
+percentile stretch is the default.</p>
+<div class="grid grid-2 "><figure><img src="media/bells_cropped_icon.jpg" alt="icon: after crop, before stretch"><figcaption>icon: after crop, before stretch</figcaption></figure><figure><img src="media/bells_stretch_icon.jpg" alt="icon: after stretch — [0.093, 1.000] → [0, 1]"><figcaption>icon: after stretch — [0.093, 1.000] → [0, 1]</figcaption></figure><figure><img src="media/bells_cropped_emir.jpg" alt="emir: after crop, before stretch"><figcaption>emir: after crop, before stretch</figcaption></figure><figure><img src="media/bells_stretch_emir.jpg" alt="emir: after stretch — [0.072, 0.865] → [0, 1]"><figcaption>emir: after stretch — [0.072, 0.865] → [0, 1]</figcaption></figure><figure><img src="media/bells_cropped_harvesters.jpg" alt="harvesters: after crop, before stretch"><figcaption>harvesters: after crop, before stretch</figcaption></figure><figure><img src="media/bells_stretch_harvesters.jpg" alt="harvesters: after stretch — [0.082, 1.000] → [0, 1]"><figcaption>harvesters: after stretch — [0.082, 1.000] → [0, 1]</figcaption></figure></div>
+<div class="grid grid-2 "><figure><img src="media/bells_hist_icon.png" alt="icon: per-channel histograms after cropping (left) and after white balance + stretch (right)"><figcaption>icon: per-channel histograms after cropping (left) and after white balance + stretch (right)</figcaption></figure><figure><img src="media/bells_hist_emir.png" alt="emir: per-channel histograms after cropping (left) and after white balance + stretch (right)"><figcaption>emir: per-channel histograms after cropping (left) and after white balance + stretch (right)</figcaption></figure></div>
+
+<h3 id="wb">7.4 Automatic white balance</h3>
+<p><b>Method.</b> White balance has two parts: estimating the colour of the illuminant, and dividing it out
+with per-channel gains (a von Kries diagonal transform). I implemented three classical estimators of the
+illuminant, all computed on the cropped image and ignoring pixels that are clipped in any channel:</p>
+<ul>
+  <li><b>gray world</b> — the mean of each channel;</li>
+  <li><b>white patch</b> — the 99th percentile of each channel (the brightest things should be white);</li>
+  <li><b>shades of gray</b> — the Minkowski mean (mean of <em>I</em><sup>6</sup>)<sup>1/6</sup>, which sits between
+      the two and is the default.</li>
+</ul>
+<p>Green is the anchor (gain 1) and the red and blue gains are clamped to [1/1.4, 1.4], so that a scene
+that really is colourful (the blue evening light on <i>church</i>, the melons) is not forced to gray. The
+figure shows the two plates with the strongest estimated casts, church and ilemselga, with all three
+estimators; the table lists the gains for every plate. Gray world over-corrects dominantly coloured
+scenes and white patch locks onto a blown-out sky, which is why shades of gray is the compromise I kept.</p>
+<div class="grid grid-4 "><figure><img src="media/bells_cropped_church.jpg" alt="church: before"><figcaption>church: before</figcaption></figure><figure><img src="media/bells_wb_gray_world_church.jpg" alt="gray world: gains 1.02, 1.00, 0.71"><figcaption>gray world: gains 1.02, 1.00, 0.71</figcaption></figure><figure><img src="media/bells_wb_white_patch_church.jpg" alt="white patch: gains 0.97, 1.00, 0.78"><figcaption>white patch: gains 0.97, 1.00, 0.78</figcaption></figure><figure><img src="media/bells_wb_church.jpg" alt="shades of gray (p = 6, used): gains 1.01, 1.00, 0.73"><figcaption>shades of gray (p = 6, used): gains 1.01, 1.00, 0.73</figcaption></figure><figure><img src="media/bells_cropped_ilemselga.jpg" alt="ilemselga: before"><figcaption>ilemselga: before</figcaption></figure><figure><img src="media/bells_wb_gray_world_ilemselga.jpg" alt="gray world: gains 1.11, 1.00, 0.74"><figcaption>gray world: gains 1.11, 1.00, 0.74</figcaption></figure><figure><img src="media/bells_wb_white_patch_ilemselga.jpg" alt="white patch: gains 1.03, 1.00, 0.91"><figcaption>white patch: gains 1.03, 1.00, 0.91</figcaption></figure><figure><img src="media/bells_wb_ilemselga.jpg" alt="shades of gray (p = 6, used): gains 1.08, 1.00, 0.80"><figcaption>shades of gray (p = 6, used): gains 1.08, 1.00, 0.80</figcaption></figure></div>
+<div class="tablewrap"><table><caption class='small'>White-balance gains (R, G, B) from gray world (GW), white patch (WP) and shades of gray p = 6 (SoG). G is the anchor; gains are clamped to [0.71, 1.4].</caption><thead><tr><th>plate</th><th>GW R</th><th>GW G</th><th>GW B</th><th>WP R</th><th>WP G</th><th>WP B</th><th>SoG R</th><th>SoG G</th><th>SoG B</th></tr></thead><tbody><tr><td>cathedral</td><td>0.903</td><td>1.000</td><td>1.256</td><td>0.979</td><td>1.000</td><td>1.027</td><td>0.967</td><td>1.000</td><td>1.027</td></tr><tr><td>monastery</td><td>1.118</td><td>1.000</td><td>0.908</td><td>1.013</td><td>1.000</td><td>0.956</td><td>1.090</td><td>1.000</td><td>0.913</td></tr><tr><td>tobolsk</td><td>1.191</td><td>1.000</td><td>0.982</td><td>1.030</td><td>1.000</td><td>0.984</td><td>1.106</td><td>1.000</td><td>0.989</td></tr><tr><td>church</td><td>1.023</td><td>1.000</td><td>0.714</td><td>0.972</td><td>1.000</td><td>0.779</td><td>1.014</td><td>1.000</td><td>0.733</td></tr><tr><td>emir</td><td>0.842</td><td>1.000</td><td>0.938</td><td>0.971</td><td>1.000</td><td>0.984</td><td>0.876</td><td>1.000</td><td>0.960</td></tr><tr><td>harvesters</td><td>0.948</td><td>1.000</td><td>1.334</td><td>1.009</td><td>1.000</td><td>1.010</td><td>0.983</td><td>1.000</td><td>1.081</td></tr><tr><td>icon</td><td>0.947</td><td>1.000</td><td>1.381</td><td>1.004</td><td>1.000</td><td>1.043</td><td>1.021</td><td>1.000</td><td>1.136</td></tr><tr><td>ilemselga</td><td>1.108</td><td>1.000</td><td>0.741</td><td>1.026</td><td>1.000</td><td>0.909</td><td>1.085</td><td>1.000</td><td>0.796</td></tr><tr><td>melons</td><td>0.884</td><td>1.000</td><td>1.162</td><td>0.970</td><td>1.000</td><td>1.030</td><td>0.933</td><td>1.000</td><td>1.063</td></tr><tr><td>religious_painting</td><td>0.941</td><td>1.000</td><td>1.022</td><td>0.989</td><td>1.000</td><td>1.012</td><td>0.974</td><td>1.000</td><td>1.046</td></tr><tr><td>self_portrait</td><td>1.041</td><td>1.000</td><td>1.171</td><td>1.046</td><td>1.000</td><td>0.964</td><td>1.048</td><td>1.000</td><td>1.030</td></tr><tr><td>siren</td><td>1.138</td><td>1.000</td><td>0.746</td><td>1.068</td><td>1.000</td><td>0.957</td><td>1.080</td><td>1.000</td><td>0.865</td></tr><tr><td>three_generations</td><td>0.946</td><td>1.000</td><td>0.874</td><td>1.013</td><td>1.000</td><td>0.971</td><td>0.991</td><td>1.000</td><td>0.945</td></tr><tr><td>wharf</td><td>0.974</td><td>1.000</td><td>0.889</td><td>0.990</td><td>1.000</td><td>0.961</td><td>0.988</td><td>1.000</td><td>0.912</td></tr><tr><td>isfandiyar</td><td>0.891</td><td>1.000</td><td>0.763</td><td>0.933</td><td>1.000</td><td>1.210</td><td>0.931</td><td>1.000</td><td>1.086</td></tr><tr><td>karlinskii</td><td>1.009</td><td>1.000</td><td>0.843</td><td>1.000</td><td>1.000</td><td>0.951</td><td>1.019</td><td>1.000</td><td>0.917</td></tr><tr><td>peasant_girls</td><td>0.717</td><td>1.000</td><td>0.930</td><td>0.927</td><td>1.000</td><td>0.939</td><td>0.831</td><td>1.000</td><td>0.947</td></tr><tr><td>vitebsk_cathedral</td><td>0.931</td><td>1.000</td><td>1.280</td><td>0.996</td><td>1.000</td><td>1.063</td><td>1.001</td><td>1.000</td><td>1.088</td></tr></tbody></table></div>
+
+<h3 id="colormap">7.5 Better colour mapping: an experiment against the LoC composites</h3>
+<p><b>Motivation.</b> There is no reason to assume that Prokudin-Gorskii's three filters correspond exactly to
+the R, G and B primaries of a display. The Library of Congress publishes a professionally produced colour
+composite of every plate (made for the Library by Blaise Agüera y Arcas in 2004), so instead of guessing a
+mapping I tried to <em>measure</em> one.</p>
+<p><b>Method.</b> For 6 plates with a known composite I (1) registered my aligned image to the LoC image
+with a translation + scale search using gradient NCC at 400 px working resolution (the LoC frame is
+cropped differently, so the scale is about 0.86), (2) sampled corresponding colours (both images box-blurred,
+every fourth pixel of the central region, saturated pixels excluded — about 5000 pairs per plate), and
+(3) solved <em>T</em> ≈ <em>A M</em>ᵀ + <em>b</em> for a 3 × 3 matrix and offset by least squares with the
+20 % worst residuals trimmed. To decide whether such a matrix is real, I validated it leave-one-plate-out
+against two baselines: the identity, and a per-channel gain + offset (a "diagonal" matrix, i.e. what white
+balance and contrast already do). The matrix would only be adopted if it beat the identity by 25 % and the
+diagonal fit by 10 % on the held-out plates and its off-diagonal terms were consistent across plates.</p>
+<div class="tablewrap"><table><caption class='small'>Registration of our aligned plates to the LoC composites and colour RMSE (0–1 scale) of three candidate mappings on the held-out plate.</caption><thead><tr><th>plate</th><th>LoC composite</th><th>scale</th><th>shift</th><th>gradient NCC</th><th>pairs</th><th>RMSE identity</th><th>RMSE diagonal</th><th>RMSE 3×3 (leave-one-out)</th></tr></thead><tbody><tr><td>emir</td><td>21886</td><td>0.86</td><td>(-4, -11)</td><td>0.885</td><td>4970</td><td>0.0395</td><td>0.0395</td><td>0.0395</td></tr><tr><td>isfandiyar</td><td>20151</td><td>0.86</td><td>(-12, -12)</td><td>0.934</td><td>4900</td><td>0.0228</td><td>0.0228</td><td>0.0228</td></tr><tr><td>karlinskii</td><td>20882</td><td>0.88</td><td>(6, -12)</td><td>0.808</td><td>4970</td><td>0.0448</td><td>0.0448</td><td>0.0448</td></tr><tr><td>peasant_girls</td><td>21043</td><td>0.88</td><td>(-2, -1)</td><td>0.821</td><td>4970</td><td>0.0531</td><td>0.0531</td><td>0.0531</td></tr><tr><td>three_generations</td><td>20542</td><td>0.88</td><td>(-1, -12)</td><td>0.846</td><td>4970</td><td>0.0477</td><td>0.0479</td><td>0.0478</td></tr><tr><td>vitebsk_cathedral</td><td>20428</td><td>0.86</td><td>(2, -9)</td><td>0.910</td><td>4970</td><td>0.0321</td><td>0.0321</td><td>0.0322</td></tr></tbody></table></div>
+<div class="tablewrap"><table><caption class='small'>Colour matrix fitted on all plates (rows: output channel; columns: input channel).</caption><thead><tr><th></th><th>R in</th><th>G in</th><th>B in</th><th>offset</th></tr></thead><tbody><tr><td>R out</td><td>+0.994</td><td>+0.009</td><td>-0.003</td><td>-0.0003</td></tr><tr><td>G out</td><td>+0.002</td><td>+0.997</td><td>+0.002</td><td>-0.0009</td></tr><tr><td>B out</td><td>-0.004</td><td>+0.007</td><td>+0.996</td><td>-0.0000</td></tr></tbody></table></div>
+<p><b>Result: not adopted.</b> The mean colour RMSE on the held-out plates is 0.0400 for the
+identity, 0.0400 for the diagonal fit and 0.0400 for the full matrix — no gain at all — and
+the fitted matrix is the identity to within 0.009 off the diagonal. In other words, the LoC's own
+composites use the straightforward R = red plate, G = green plate, B = blue plate mapping, and there is no
+evidence in this reference for a different linear colour mapping. I therefore keep the direct mapping and
+rely on white balance and contrast for the colour work; the comparison below shows that my results and the
+LoC composites are indeed very close (the LoC images also include the plate borders).</p>
+<div class="grid grid-3 "><figure><img src="media/cm_ours_emir.jpg" alt="emir: ours (aligned, cropped, stretched)"><figcaption>emir: ours (aligned, cropped, stretched)</figcaption></figure><figure><img src="media/cm_mapped_emir.jpg" alt="emir: ours through the fitted matrix"><figcaption>emir: ours through the fitted matrix</figcaption></figure><figure><img src="media/cm_loc_emir.jpg" alt="emir: Library of Congress composite 21886"><figcaption>emir: Library of Congress composite 21886</figcaption></figure><figure><img src="media/cm_ours_isfandiyar.jpg" alt="isfandiyar: ours (aligned, cropped, stretched)"><figcaption>isfandiyar: ours (aligned, cropped, stretched)</figcaption></figure><figure><img src="media/cm_mapped_isfandiyar.jpg" alt="isfandiyar: ours through the fitted matrix"><figcaption>isfandiyar: ours through the fitted matrix</figcaption></figure><figure><img src="media/cm_loc_isfandiyar.jpg" alt="isfandiyar: Library of Congress composite 20151"><figcaption>isfandiyar: Library of Congress composite 20151</figcaption></figure><figure><img src="media/cm_ours_karlinskii.jpg" alt="karlinskii: ours (aligned, cropped, stretched)"><figcaption>karlinskii: ours (aligned, cropped, stretched)</figcaption></figure><figure><img src="media/cm_mapped_karlinskii.jpg" alt="karlinskii: ours through the fitted matrix"><figcaption>karlinskii: ours through the fitted matrix</figcaption></figure><figure><img src="media/cm_loc_karlinskii.jpg" alt="karlinskii: Library of Congress composite 20882"><figcaption>karlinskii: Library of Congress composite 20882</figcaption></figure></div>
+
+<h3 id="transform">7.6 Better transformations: rotation and scale</h3>
+<p><b>Rotation search.</b> I extended the coarse-to-fine search with a rotation dimension: at the coarsest
+level the moving plate is rotated by every angle in [−2°, 2°] in 0.25° steps (17 angles, each with the full
+translation search), the best angle is refined to ±0.125° at the next level, and the finer levels search
+translation only. At full resolution the translation-only hypothesis (0°) is scored as well and kept if it
+is at least as good — rotation is only adopted when it genuinely helps. The rotation itself is the one place
+where I use a library resampling routine (bilinear <code>skimage.transform.rotate</code>).</p>
+<p>Two honest checks. First, a synthetic one: I rotated the B channel of two real plates by 1.5° and shifted
+it by (4, −6). Translation-only search cannot fit this and leaves the corners misaligned; the rotation
+search recovers −1.5° and (−4, 6) exactly:</p>
+<div class="grid grid-3 "><figure><img src="media/rot_demo_before_cathedral.jpg" alt="cathedral: B (blue) vs. its copy rotated 1.5° and shifted (4, -6) (yellow)"><figcaption>cathedral: B (blue) vs. its copy rotated 1.5° and shifted (4, -6) (yellow)</figcaption></figure><figure><img src="media/rot_demo_trans_cathedral.jpg" alt="translation-only search: (-3, 7) — corners stay misaligned"><figcaption>translation-only search: (-3, 7) — corners stay misaligned</figcaption></figure><figure><img src="media/rot_demo_rigid_cathedral.jpg" alt="rotation + translation search: -1.500°, (-4, 6) — recovered exactly"><figcaption>rotation + translation search: -1.500°, (-4, 6) — recovered exactly</figcaption></figure><figure><img src="media/rot_demo_before_harvesters.jpg" alt="harvesters: B (blue) vs. its copy rotated 1.5° and shifted (4, -6) (yellow)"><figcaption>harvesters: B (blue) vs. its copy rotated 1.5° and shifted (4, -6) (yellow)</figcaption></figure><figure><img src="media/rot_demo_trans_harvesters.jpg" alt="translation-only search: (-11, 8) — corners stay misaligned"><figcaption>translation-only search: (-11, 8) — corners stay misaligned</figcaption></figure><figure><img src="media/rot_demo_rigid_harvesters.jpg" alt="rotation + translation search: -1.500°, (-4, 6) — recovered exactly"><figcaption>rotation + translation search: -1.500°, (-4, 6) — recovered exactly</figcaption></figure></div>
+<p>Second, the real plates. Every fitted angle is within ±0.375°, i.e. within the resolution of the
+search — the plates are, to a very good approximation, pure translations, as one would expect from a rigid
+plate holder. (A bias of one step towards non-zero angles is expected: bilinear resampling slightly smooths
+the image, which by itself raises the NCC of gradient features.)</p>
+<div class="tablewrap"><table><caption class='small'>Rotation search on the real plates: angles in [−2°, 2°], 0.25° steps at the coarsest level, refined to 0.125°.</caption><thead><tr><th>plate</th><th>G angle (°)</th><th>G rigid (x, y)</th><th>G translation (x, y)</th><th>R angle (°)</th><th>R rigid (x, y)</th><th>R translation (x, y)</th><th>time (s)</th></tr></thead><tbody><tr><td>cathedral</td><td>-0.125</td><td>(2, 5)</td><td>(2, 5)</td><td>-0.125</td><td>(3, 12)</td><td>(3, 12)</td><td>1</td></tr><tr><td>monastery</td><td>-0.125</td><td>(2, -3)</td><td>(2, -3)</td><td>-0.125</td><td>(3, 3)</td><td>(2, 3)</td><td>1</td></tr><tr><td>tobolsk</td><td>-0.125</td><td>(3, 3)</td><td>(3, 3)</td><td>-0.250</td><td>(3, 7)</td><td>(3, 7)</td><td>1</td></tr><tr><td>church</td><td>+0.000</td><td>(4, 25)</td><td>(4, 25)</td><td>-0.125</td><td>(-4, 58)</td><td>(-4, 58)</td><td>8</td></tr><tr><td>emir</td><td>+0.000</td><td>(23, 49)</td><td>(23, 49)</td><td>-0.125</td><td>(40, 106)</td><td>(40, 107)</td><td>7</td></tr><tr><td>harvesters</td><td>-0.250</td><td>(18, 60)</td><td>(17, 60)</td><td>-0.250</td><td>(14, 124)</td><td>(14, 123)</td><td>8</td></tr><tr><td>icon</td><td>+0.000</td><td>(17, 42)</td><td>(17, 42)</td><td>-0.125</td><td>(23, 91)</td><td>(23, 90)</td><td>6</td></tr><tr><td>ilemselga</td><td>+0.000</td><td>(7, 40)</td><td>(7, 40)</td><td>-0.125</td><td>(11, 131)</td><td>(11, 131)</td><td>7</td></tr><tr><td>melons</td><td>+0.000</td><td>(10, 80)</td><td>(10, 80)</td><td>-0.125</td><td>(13, 181)</td><td>(13, 177)</td><td>8</td></tr><tr><td>religious_painting</td><td>+0.000</td><td>(1, 29)</td><td>(1, 29)</td><td>-0.125</td><td>(7, 69)</td><td>(6, 69)</td><td>7</td></tr><tr><td>self_portrait</td><td>-0.250</td><td>(30, 78)</td><td>(29, 78)</td><td>-0.250</td><td>(37, 176)</td><td>(37, 176)</td><td>7</td></tr><tr><td>siren</td><td>-0.125</td><td>(-5, 50)</td><td>(-6, 49)</td><td>-0.250</td><td>(-24, 97)</td><td>(-24, 96)</td><td>8</td></tr><tr><td>three_generations</td><td>-0.250</td><td>(15, 52)</td><td>(13, 53)</td><td>-0.250</td><td>(12, 111)</td><td>(9, 111)</td><td>8</td></tr><tr><td>wharf</td><td>+0.000</td><td>(-7, 15)</td><td>(-7, 15)</td><td>-0.125</td><td>(-14, 82)</td><td>(-16, 82)</td><td>8</td></tr><tr><td>isfandiyar</td><td>+0.000</td><td>(74, 42)</td><td>(74, 42)</td><td>-0.375</td><td>(125, 119)</td><td>(123, 120)</td><td>8</td></tr><tr><td>karlinskii</td><td>-0.125</td><td>(-22, 54)</td><td>(-23, 54)</td><td>+0.000</td><td>(-56, 108)</td><td>(-56, 108)</td><td>7</td></tr><tr><td>peasant_girls</td><td>+0.125</td><td>(11, -15)</td><td>(10, -15)</td><td>-0.125</td><td>(17, 13)</td><td>(16, 11)</td><td>6</td></tr><tr><td>vitebsk_cathedral</td><td>+0.000</td><td>(-8, 37)</td><td>(-8, 37)</td><td>+0.000</td><td>(-21, 81)</td><td>(-21, 81)</td><td>5</td></tr></tbody></table></div>
+<p><b>Residual analysis and the discovery of a scale difference.</b> To see whether anything is left after
+the best translation, I re-aligned five 400 × 400 windows — the centre and the four corners — of the
+translation-aligned plates independently. If a plate were a pure translation, every window's residual would
+be (0, 0). Instead, several plates show residuals of 5–10 px whose sign flips between opposite corners:</p>
+<div class="tablewrap"><table><caption class='small'>Residual shift (x, y) of five 400 × 400 windows after the best global translation (search radius ±6 px). Opposite corners move in opposite directions: a scale difference between the plates.</caption><thead><tr><th>plate</th><th>top-left G / R</th><th>top-right G / R</th><th>centre G / R</th><th>bottom-left G / R</th><th>bottom-right G / R</th></tr></thead><tbody><tr><td>three_generations</td><td>(-2, -6) / (0, -6)</td><td>(6, -6) / (6, -3)</td><td>(3, -4) / (3, -2)</td><td>(-6, -2) / (6, 1)</td><td>(3, 4) / (1, 4)</td></tr><tr><td>harvesters</td><td>(-4, -6) / (-1, -6)</td><td>(6, -2) / (6, 0)</td><td>(1, -1) / (2, 0)</td><td>(-6, -3) / (-4, -3)</td><td>(2, 5) / (0, 6)</td></tr><tr><td>self_portrait</td><td>(-2, -6) / (-1, -6)</td><td>(6, -1) / (6, 0)</td><td>(0, -1) / (0, -1)</td><td>(-6, -2) / (-5, -4)</td><td>(0, 5) / (-1, 5)</td></tr><tr><td>emir</td><td>(-3, -5) / (0, -4)</td><td>(6, 0) / (6, -1)</td><td>(0, -1) / (1, -3)</td><td>(-4, 0) / (0, -4)</td><td>(2, 2) / (-2, -1)</td></tr><tr><td>cathedral</td><td>(0, 0) / (0, -1)</td><td>(0, 0) / (0, 0)</td><td>(0, 0) / (0, 0)</td><td>(0, 0) / (0, 0)</td><td>(0, 0) / (0, 0)</td></tr></tbody></table></div>
+<p>Opposite corners moving in opposite directions along the diagonals is the signature of a
+<em>scale</em> difference, not a rotation (a rotation would move the corners tangentially). A plausible
+physical explanation is that the three exposures were focused slightly differently — the lens has a
+different focal length for blue and red light — so one plate is imaged a fraction of a percent larger
+than another. This also explains why the best integer translation depends on the metric: with a scale
+error, no single translation is right everywhere, and the fringes I could still see in the corners of
+<i>three_generations</i> after translation-only alignment are exactly this effect.</p>
+<p><b>Similarity refinement.</b> Searching over scale exhaustively at full resolution is expensive, but it is
+unnecessary. The residual shifts of a 3 × 3 grid of windows are a direct measurement of the transform:
+for a similarity transform about the image centre the residual at window centre <em>p</em> is
+(<em>A</em> − <em>I</em>) <em>p</em> + <em>t</em> with <em>A</em> = <em>s R</em>(θ), which is <em>linear</em>
+in (<em>s</em> cos θ − 1, <em>s</em> sin θ, <em>t<sub>x</sub></em>, <em>t<sub>y</sub></em>). I solve it by least
+squares over the windows (windows with a weak NCC peak or a shift on the search boundary are discarded, and
+windows that disagree with the fitted model by more than 2 px are dropped and the fit repeated), warp the
+plate once with the fitted scale, rotation and translation, and re-measure the window residuals.</p>
+<div class="tablewrap"><table><caption class='small'>Similarity transform fitted to a 3 × 3 grid of 400 × 400 window residuals (search radius ±20 px; windows with a weak peak or a shift on the search boundary discarded) and the largest window residual before → after warping.</caption><thead><tr><th>plate</th><th>G scale</th><th>G rotation (°)</th><th>G max residual (px)</th><th>R scale</th><th>R rotation (°)</th><th>R max residual (px)</th></tr></thead><tbody><tr><td>cathedral</td><td>1.0033</td><td>+0.122</td><td>1 → 0</td><td>1.0031</td><td>+0.122</td><td>1 → 0</td></tr><tr><td>monastery</td><td>1.0051</td><td>+0.048</td><td>1 → 0</td><td>1.0064</td><td>+0.122</td><td>1 → 0</td></tr><tr><td>tobolsk</td><td>1.0036</td><td>+0.198</td><td>1 → 0</td><td>0.9982</td><td>+0.198</td><td>1 → 0</td></tr><tr><td>church</td><td>1.0021</td><td>+0.110</td><td>2 → 1</td><td>1.0000</td><td>+0.160</td><td>3 → 1</td></tr><tr><td>emir</td><td>1.0034</td><td>+0.098</td><td>6 → 2</td><td>0.9992</td><td>+0.142</td><td>5 → 1</td></tr><tr><td>harvesters</td><td>1.0051</td><td>+0.203</td><td>10 → 2</td><td>1.0045</td><td>+0.280</td><td>10 → 2</td></tr><tr><td>icon</td><td>1.0032</td><td>+0.102</td><td>7 → 1</td><td>1.0029</td><td>+0.102</td><td>7 → 2</td></tr><tr><td>ilemselga</td><td>0.9982</td><td>+0.039</td><td>3 → 1</td><td>0.9979</td><td>+0.090</td><td>4 → 1</td></tr><tr><td>melons</td><td>1.0042</td><td>+0.099</td><td>9 → 1</td><td>1.0039</td><td>+0.160</td><td>8 → 1</td></tr><tr><td>religious_painting</td><td>1.0033</td><td>+0.034</td><td>7 → 1</td><td>1.0027</td><td>+0.122</td><td>7 → 1</td></tr><tr><td>self_portrait</td><td>1.0038</td><td>+0.208</td><td>9 → 1</td><td>1.0027</td><td>+0.243</td><td>8 → 1</td></tr><tr><td>siren</td><td>1.0039</td><td>+0.103</td><td>8 → 1</td><td>1.0020</td><td>+0.218</td><td>8 → 1</td></tr><tr><td>three_generations</td><td>1.0049</td><td>+0.169</td><td>12 → 1</td><td>1.0032</td><td>+0.202</td><td>9 → 1</td></tr><tr><td>wharf</td><td>0.9986</td><td>+0.012</td><td>2 → 1</td><td>0.9967</td><td>+0.091</td><td>6 → 1</td></tr><tr><td>isfandiyar</td><td>1.0043</td><td>+0.062</td><td>6 → 1</td><td>1.0016</td><td>+0.278</td><td>7 → 5</td></tr><tr><td>karlinskii</td><td>1.0034</td><td>+0.114</td><td>10 → 1</td><td>1.0017</td><td>+0.171</td><td>7 → 1</td></tr><tr><td>peasant_girls</td><td>1.0047</td><td>+0.000</td><td>5 → 1</td><td>1.0038</td><td>+0.160</td><td>7 → 2</td></tr><tr><td>vitebsk_cathedral</td><td>1.0046</td><td>+0.055</td><td>7 → 1</td><td>1.0048</td><td>+0.080</td><td>7 → 2</td></tr></tbody></table></div>
+<p>The fitted scales cluster around 1.003–1.005 (the G and R plates are 0.3–0.5 % larger than B) with
+rotations of 0.1–0.3°, and after the warp the largest window residual drops to 0–2 px on almost every plate.
+The figure shows the worst window of <i>three_generations</i> before and after:</p>
+<div class="grid grid-2 "><figure><img src="media/sim_before_three_generations.jpg" alt="three_generations, top-right window after translation-only alignment"><figcaption>three_generations, top-right window after translation-only alignment</figcaption></figure><figure><img src="media/sim_after_three_generations.jpg" alt="after the similarity warp (G scale 1.0049, R scale 1.0032)"><figcaption>after the similarity warp (G scale 1.0049, R scale 1.0032)</figcaption></figure></div>
+
+<h3 id="dss">7.7 Another data source: photographic plates of the Palomar sky survey</h3>
+<p>Astronomical imaging still works like Prokudin-Gorskii's camera: one filter at a time. The Second
+Palomar Observatory Sky Survey (POSS-II) photographed the sky on glass plates through blue (J), red (F) and
+near-infrared (N) emulsion/filter combinations on different nights, and the Space Telescope Science
+Institute serves scans of them as FITS files. I fetched a 30′ field around the Dumbbell Nebula (M27) from the
+three surveys, deliberately requesting each plate with a slightly different field centre (offsets of
+30–40″) so that the cutouts are not pre-registered by the archive's plate solutions. A small FITS reader
+(2880-byte header blocks of 80-character cards, big-endian 16-bit data scaled by BSCALE/BZERO) turns them
+into arrays; each plate is sky-subtracted, scaled by its 99.7th percentile and given an arcsinh stretch, the
+standard way to show stars without saturating everything. Then the same rigid search as in 7.6 (gradient
+NCC) aligns the red and infrared plates to the blue one, and the shades-of-gray white balance is applied.
+The result is a "false colour" image: infrared → R, red → G, blue → B.</p>
+<div class="tablewrap"><table><thead><tr><th>plate</th><th>plate id</th><th>date observed</th><th>exposure (min)</th><th>size</th></tr></thead><tbody><tr><td>blue</td><td>SJ03394</td><td>1990-07-24T06:58:00</td><td>60.0</td><td>1782 × 1786</td></tr><tr><td>ir</td><td>SN04668</td><td>1992-07-22T07:07:00</td><td>80.0</td><td>1782 × 1786</td></tr><tr><td>red</td><td>SF06903</td><td>1996-07-11T08:60:00</td><td>85.0</td><td>1782 × 1786</td></tr></tbody></table></div>
+<div class="grid grid-3 "><figure><img src="media/dss_unaligned.jpg" alt="three DSS plates stacked as scanned (IR → R, red → G, blue → B)"><figcaption>three DSS plates stacked as scanned (IR → R, red → G, blue → B)</figcaption></figure><figure><img src="media/dss_aligned.jpg" alt="after rigid alignment"><figcaption>after rigid alignment</figcaption></figure><figure><img src="media/dss_final.jpg" alt="cropped and white balanced (shades of gray)"><figcaption>cropped and white balanced (shades of gray)</figcaption></figure></div>
+<div class="grid grid-2 "><figure><img src="media/dss_detail_before.jpg" alt="detail before alignment"><figcaption>detail before alignment</figcaption></figure><figure><img src="media/dss_detail_after.jpg" alt="detail after alignment"><figcaption>detail after alignment</figcaption></figure></div>
+<div class="tablewrap"><table><thead><tr><th>channel</th><th>angle (°)</th><th>rigid (x, y)</th><th>translation-only (x, y)</th><th>gradient NCC</th><th>stars matched</th><th>median star offset after (x, y)</th></tr></thead><tbody><tr><td>red plate → G</td><td>+0.125</td><td>(-29, 31)</td><td>(-29, 31)</td><td>0.929</td><td>129</td><td>-0.00, -0.02</td></tr><tr><td>ir plate → R</td><td>+0.250</td><td>(27, -35)</td><td>(26, -35)</td><td>0.805</td><td>58</td><td>+0.19, +0.07</td></tr></tbody></table></div>
+<p>The three exposures span six years and different emulsions, so star brightnesses differ a lot between
+plates — the same kind of contrast mismatch as <i>emir</i> — and gradient NCC handles it. As an independent
+check I detect stars in the blue plate and in each aligned plate (bright compact blobs above the 99.5th
+percentile, intensity-weighted centroids) and match them within 3 px: the median offset of the matched
+stars after alignment is a fraction of a pixel. Individual stars still show small colour halos because
+the plates have different point-spread functions, which no alignment can remove. Some stars are
+genuinely red or blue: that is real astrophysics, not misregistration.</p>
+<p class="small">Plates: Digitized Sky Survey, produced at the Space Telescope Science Institute under U.S.
+Government grant NAG W-2166; POSS-II plates taken with the Oschin Schmidt Telescope on Palomar Mountain
+(California Institute of Technology and Palomar Observatory).</p>
+
+<h3 id="gallery">7.8 The final gallery</h3>
+<p>All 18 plates through the full pipeline: gradient-NCC pyramid alignment, automatic crop, shades-of-gray
+white balance and the joint percentile stretch.</p>
+<div class="grid grid-3 "><figure><img src="media/final_cathedral.jpg" alt="cathedral"><figcaption>cathedral</figcaption></figure><figure><img src="media/final_monastery.jpg" alt="monastery"><figcaption>monastery</figcaption></figure><figure><img src="media/final_tobolsk.jpg" alt="tobolsk"><figcaption>tobolsk</figcaption></figure><figure><img src="media/final_church.jpg" alt="church"><figcaption>church</figcaption></figure><figure><img src="media/final_emir.jpg" alt="emir"><figcaption>emir</figcaption></figure><figure><img src="media/final_harvesters.jpg" alt="harvesters"><figcaption>harvesters</figcaption></figure><figure><img src="media/final_icon.jpg" alt="icon"><figcaption>icon</figcaption></figure><figure><img src="media/final_ilemselga.jpg" alt="ilemselga"><figcaption>ilemselga</figcaption></figure><figure><img src="media/final_melons.jpg" alt="melons"><figcaption>melons</figcaption></figure><figure><img src="media/final_religous_painting.jpg" alt="religious_painting"><figcaption>religious_painting</figcaption></figure><figure><img src="media/final_self_portrait.jpg" alt="self_portrait"><figcaption>self_portrait</figcaption></figure><figure><img src="media/final_siren.jpg" alt="siren"><figcaption>siren</figcaption></figure><figure><img src="media/final_three_generations.jpg" alt="three_generations"><figcaption>three_generations</figcaption></figure><figure><img src="media/final_wharf.jpg" alt="wharf"><figcaption>wharf</figcaption></figure><figure><img src="media/final_isfandiyar.jpg" alt="isfandiyar"><figcaption>isfandiyar</figcaption></figure><figure><img src="media/final_karlinskii.jpg" alt="karlinskii"><figcaption>karlinskii</figcaption></figure><figure><img src="media/final_peasant_girls.jpg" alt="peasant_girls"><figcaption>peasant_girls</figcaption></figure><figure><img src="media/final_vitebsk_cathedral.jpg" alt="vitebsk_cathedral"><figcaption>vitebsk_cathedral</figcaption></figure></div>
+
+<h2 id="repro">8. Reproducibility and runtime</h2>
+<p>Everything is in the <code>code/</code> directory of the submission (Python 3.12, NumPy, SciPy,
+scikit-image for reading/rotating, Pillow for I/O, Matplotlib for the histograms). Alignment, the metrics
+and the pyramid are implemented from scratch in <code>align.py</code>, <code>metrics.py</code> and
+<code>pyramid.py</code>; <code>main.py</code> is the command line entry point and every number on this page is
+rendered from the <code>results.json</code> it writes. The full run is:</p>
+<pre>cd code &amp;&amp; uv sync                  # or: pip install -r requirements.txt
+uv run python main.py single        # Sec. 3: exhaustive search on the JPEGs (L2, NCC)
+uv run python main.py download      # Sec. 5: the four LoC plates
+uv run python main.py align         # Sec. 4-5: pyramid alignment, all plates (L2, NCC)
+uv run python main.py align --feature grad   # 7.1
+uv run python main.py bells         # 7.1-7.4: crop, white balance, contrast
+uv run python main.py rotation      # 7.6: rotation search, residuals, synthetic demo
+uv run python main.py similarity    # 7.6: scale + rotation refinement
+uv run python main.py colormap      # 7.5
+uv run python main.py dss           # 7.7
+uv run python main.py build-site    # this page
+uv run pytest                       # 126 unit tests</pre>
+<div class="tablewrap"><table><thead><tr><th>stage</th><th>seconds per image (mean / max)</th></tr></thead><tbody><tr><td>single-scale, ±15 window, raw NCC (JPEGs)</td><td>0.1 / 0.1</td></tr><tr><td>pyramid, raw NCC (TIFFs)</td><td>1.4 / 1.7</td></tr><tr><td>pyramid, raw L2 (TIFFs)</td><td>1.0 / 1.2</td></tr><tr><td>pyramid, gradient NCC (TIFFs)</td><td>2.6 / 3.1</td></tr><tr><td>full bells & whistles pipeline (TIFFs)</td><td>5.8 / 7.1</td></tr><tr><td>rotation search, both channels (TIFFs)</td><td>7.4 / 8.1</td></tr></tbody></table></div>
+<p class="small">Measured on Darwin arm64, Apple M5, Python 3.12.10, NumPy 2.5.3; times are per image and include reading the file and writing the JPEG.
+Page generated on September 16, 2026.</p>
+
+<footer>
+  <p>This page is static: it contains no animations or interactive elements, so the printed PDF is a complete
+  record of it. Glass-plate scans: Prokudin-Gorskii Collection, Library of Congress, Prints and Photographs
+  Division. Sky-survey plates: Digitized Sky Survey / STScI. Course: CS180, UC Berkeley, Fall 2026.</p>
+</footer>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,80 @@
+/* CS180 Project 1 -- Phi Linh Phan. Plain, print-friendly, no frameworks. */
+:root {
+  --ink: #1b1b1b; --muted: #5b5b5b; --rule: #d9d9d9; --paper: #ffffff; --tint: #f6f6f4;
+  --accent: #8a1c1c; --link: #1f4e8c; --code: #f1f1f1;
+}
+html { color-scheme: light; }
+body { margin: 0; background: var(--paper); color: var(--ink);
+  font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+main { max-width: 1000px; margin: 0 auto; padding: 0 24px 64px; }
+header.title { padding: 40px 0 8px; border-bottom: 3px solid var(--accent); margin-bottom: 20px; }
+header.title h1 { font-size: 2.1rem; line-height: 1.15; margin: 0 0 6px; }
+header.title .sub { color: var(--muted); font-size: 1.05rem; margin: 0; }
+h2 { font-size: 1.55rem; margin: 2.6rem 0 0.8rem; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1.2rem; margin: 1.8rem 0 0.6rem; }
+h4 { font-size: 1.02rem; margin: 1.2rem 0 0.4rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+p, li { max-width: 78ch; }
+a { color: var(--link); }
+nav.toc { background: var(--tint); border: 1px solid var(--rule); padding: 12px 18px; border-radius: 6px; margin: 18px 0 28px; }
+nav.toc ol { margin: 6px 0 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+nav.toc li { margin: 2px 0; }
+figure { margin: 18px 0 26px; }
+figure img { width: 100%; height: auto; display: block; background: #eee; }
+figcaption { font-size: .9rem; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+.grid { display: grid; gap: 14px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid.crop figcaption { font-size: .78rem; }
+.grid.hero { align-items: start; }
+.grid.hero figure img { max-height: 380px; width: auto; max-width: 100%; margin: 0 auto; }
+.grid figure { margin: 0; }
+.grid figure img { width: 100%; }
+.cell-label { font-size: .85rem; color: var(--muted); margin: 4px 0 0; text-align: center; }
+.crop img { aspect-ratio: 1 / 1; object-fit: cover; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: 12px 0 20px; }
+th, td { padding: 5px 8px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+th { background: var(--tint); font-weight: 600; }
+th:first-child, td:first-child { text-align: left; }
+tbody tr:nth-child(even) { background: #fafaf9; }
+td.bad { color: var(--accent); font-weight: 600; }
+td.note { white-space: normal; text-align: left; font-size: .85rem; color: var(--muted); }
+.math { font-family: "Times New Roman", Georgia, serif; font-size: 1.12rem; padding: .55rem 1rem; margin: 12px 0;
+  background: var(--tint); border-left: 3px solid #bbb; overflow-x: auto; }
+.math var { font-style: italic; }
+code, pre { font-family: Menlo, Consolas, "Courier New", monospace; font-size: .86em; }
+code { background: var(--code); padding: 1px 4px; border-radius: 3px; }
+pre { background: var(--code); padding: 10px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
+.callout { background: var(--tint); border-left: 4px solid var(--accent); padding: 10px 16px; margin: 16px 0; }
+.small { font-size: .9rem; color: var(--muted); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: .95rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+svg.diagram { width: 100%; max-width: 760px; height: auto; display: block; margin: 12px auto; }
+.tablewrap { overflow-x: auto; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: .9rem; }
+@media (max-width: 640px) {
+  .grid-3, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-5, .grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  nav.toc ol { columns: 1; }
+  body { font-size: 16px; }
+}
+@media print {
+  @page { size: Letter; margin: 0.6in 0.5in; }
+  body { font-size: 11.5pt; }
+  main { max-width: 100%; padding: 0; }
+  figure, .callout, .math, pre, tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  table { font-size: 8.6pt; }
+  th, td { padding: 3px 5px; white-space: normal; }
+  .tablewrap { overflow: visible; }
+  pre { white-space: pre-wrap; font-size: 8.4pt; }
+  h2, h3, h4 { break-after: avoid; }
+  img { max-height: 7in; }
+  .grid figure img { max-height: 4.5in; }
+  .grid.crop figure img { max-height: 2in; }
+  a { color: inherit; text-decoration: none; }
+  nav.toc ol { columns: 2; }
+}
