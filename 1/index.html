@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="build-id" content="20260916-014835">
+<meta name="build-id" content="20260916-015027">
 <title>Colorizing the Prokudin-Gorskii Collection · CS180 Project 1 · Phi Linh Phan</title>
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -287,7 +287,7 @@ of the dimension:</p>
       12 % of an edge, a row is "border-like" if its median is below 0.20 — the black film edge, or the dark
       separator line between two exposures; these bands are grainy and slightly tilted, so no flatness is
       required — or if at least 80 % of its pixels are above 0.88 and 95 % lie within 0.015 of the row median
-      (the saturated, flat scanner margin; a bright sky is bright but never that flat). Only runs of at
+      (the saturated, flat scanner margin; a bright sky is rarely that flat — the cloudless sky of <i>ilemselga</i> is the one exception in this set). Only runs of at
       least 6 consecutive border-like rows count. Everything from the edge to the inner end of the
       <em>innermost</em> such band is discarded, plus an 8 px pad. The "innermost" rule matters: the scan
       is cut into equal thirds, but the physical frame boundary lies up to ~130 px inside a third, and the
@@ -326,9 +326,10 @@ bands to be flat missed the grainy separators; accepting every dark band cropped
 <div class="grid grid-2 "><figure><img src="media/bells_aligned_emir.jpg" alt="emir: aligned (gradient NCC), uncropped"><figcaption>emir: aligned (gradient NCC), uncropped</figcaption></figure><figure><img src="media/bells_cropped_emir.jpg" alt="emir: after automatic cropping"><figcaption>emir: after automatic cropping</figcaption></figure></div>
 <div class="tablewrap"><table><caption class='small'>Pixels removed on each side by the automatic crop (cap: 12 % per side).</caption><thead><tr><th>plate</th><th>top</th><th>bottom</th><th>left</th><th>right</th><th>area removed</th></tr></thead><tbody><tr><td>cathedral</td><td>24</td><td>21</td><td>30</td><td>28</td><td>26.1 %</td></tr><tr><td>monastery</td><td>25</td><td>35</td><td>30</td><td>24</td><td>29.0 %</td></tr><tr><td>tobolsk</td><td>19</td><td>19</td><td>31</td><td>24</td><td>23.5 %</td></tr><tr><td>church</td><td>89</td><td>146</td><td>66</td><td>231</td><td>14.9 %</td></tr><tr><td>emir</td><td>149</td><td>71</td><td>237</td><td>138</td><td>16.3 %</td></tr><tr><td>harvesters</td><td>186</td><td>55</td><td>179</td><td>212</td><td>17.3 %</td></tr><tr><td>icon</td><td>132</td><td>48</td><td>246</td><td>144</td><td>15.4 %</td></tr><tr><td>ilemselga</td><td>377</td><td>128</td><td>129</td><td>231</td><td>23.5 %</td></tr><tr><td>melons</td><td>228</td><td>13</td><td>129</td><td>129</td><td>13.8 %</td></tr><tr><td>religious_painting</td><td>124</td><td>123</td><td>103</td><td>125</td><td>13.4 %</td></tr><tr><td>self_portrait</td><td>201</td><td>29</td><td>301</td><td>178</td><td>18.8 %</td></tr><tr><td>siren</td><td>190</td><td>13</td><td>108</td><td>219</td><td>14.3 %</td></tr><tr><td>three_generations</td><td>168</td><td>39</td><td>159</td><td>109</td><td>13.2 %</td></tr><tr><td>wharf</td><td>151</td><td>21</td><td>94</td><td>129</td><td>10.9 %</td></tr><tr><td>isfandiyar</td><td>172</td><td>21</td><td>210</td><td>120</td><td>14.4 %</td></tr><tr><td>karlinskii</td><td>217</td><td>390</td><td>191</td><td>145</td><td>25.9 %</td></tr><tr><td>peasant_girls</td><td>126</td><td>95</td><td>182</td><td>76</td><td>13.4 %</td></tr><tr><td>vitebsk_cathedral</td><td>94</td><td>99</td><td>142</td><td>247</td><td>15.7 %</td></tr></tbody></table></div>
 <p><b>Limitations.</b> The disagreement safety net trims regions that genuinely differ between exposures —
-the wind-blown grass at the bottom of <i>karlinskii</i> costs 12 % of that image's height — and the 12 % cap
-bounds every stage, so a border wider than that would survive. Everything is decided by fixed thresholds
-shared by all plates; nothing is tuned per image.</p>
+the wind-blown grass at the bottom of <i>karlinskii</i> costs 12 % of that image's height — and the perfectly
+uniform sky of <i>ilemselga</i> passes the white-margin test in the blue plate and costs 12 % of the top. The
+12 % cap bounds every stage, so a border wider than that would survive. Everything is decided by fixed
+thresholds shared by all plates; nothing is tuned per image.</p>
 
 <h3 id="contrast">7.3 Automatic contrast</h3>
 <p><b>Method.</b> A joint linear stretch: the 0.5th percentile of all channel values is mapped to 0 and the
